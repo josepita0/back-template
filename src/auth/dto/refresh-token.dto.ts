@@ -1,3 +1,4 @@
+import { ApiProperty } from '@nestjs/swagger';
 import { IsNotEmpty, IsString, MinLength } from 'class-validator';
 
 /**
@@ -10,6 +11,7 @@ import { IsNotEmpty, IsString, MinLength } from 'class-validator';
  * to the body payload path.
  */
 export class RefreshTokenDto {
+  @ApiProperty({ minLength: 16, example: 'a1b2c3d4e5f6...hex-string-from-login' })
   @IsString({ message: 'refreshToken must be a string' })
   @IsNotEmpty({ message: 'refreshToken is required' })
   @MinLength(16)

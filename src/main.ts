@@ -1,6 +1,7 @@
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory, Reflector } from '@nestjs/core';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter.js';
 import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter.js';
@@ -20,6 +21,8 @@ import { AppModule } from './app.module.js';
  *   5. ValidationPipe with whitelist + forbidNonWhitelisted + transform
  *   6. AllExceptionsFilter + PrismaExceptionFilter as global filters
  *   7. EnvelopeInterceptor as a global interceptor (lifted from per-controller)
+ *   8. Swagger UI at /api/docs when SWAGGER_ENABLED=true
+ *      (also on in NODE_ENV=development by default)
  *
  * ThrottlerGuard is wired as APP_GUARD in AppModule (PR #4); its
  * Reflector dep comes from CommonModule (global). Per-route @Throttle()
@@ -80,8 +83,59 @@ async function bootstrap() {
   // CommonModule (global) so we can fetch it here.
   app.useGlobalInterceptors(new EnvelopeInterceptor(app.get(Reflector)));
 
+  // ---- Swagger ---------------------------------------------------------------
+  // Spec §10 — Swagger setup:
+  //   - /api/docs serves Swagger UI
+  //   - addBearerAuth() for protected endpoints
+  //   - Disabled in production unless SWAGGER_ENABLED=true
+  //
+  // Resolution order:
+  //   1. NODE_ENV=development → always on (dev convenience)
+  //   2. SWAGGER_ENABLED=true → on
+  //   3. NODE_ENV=production AND SWAGGER_ENABLED≠true → off (404)
+  //
+  // We use `swagger-ui-express` because the project runs on Express
+  // (`@nestjs/platform-express`). Fastify users would swap in
+  // `@fastify/static` here.
+  const nodeEnv = configService.get<string>('nodeEnv', { infer: true });
+  const swaggerEnabled =
+    nodeEnv !== 'production' ||
+    configService.get<boolean>('swagger.enabled', { infer: true });
+
+  if (swaggerEnabled) {
+    const swaggerConfig = new DocumentBuilder()
+      .setTitle('Back-Template API')
+      .setDescription(
+        'Production-ready NestJS backend template. Auth, Users CRUD, Health probes, structured envelope.',
+      )
+      .setVersion('0.0.1')
+      .addBearerAuth(
+        {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+          description:
+            'Paste the accessToken returned by POST /auth/login as `Bearer <token>`.',
+          name: 'Authorization',
+          in: 'header',
+        },
+        'access-token',
+      )
+      .addTag('auth', 'Login, refresh, password reset (admin-driven)')
+      .addTag('users', 'User CRUD (ADMIN-only)')
+      .addTag('health', 'Liveness + readiness probes')
+      .build();
+
+    const document = SwaggerModule.createDocument(app, swaggerConfig);
+    SwaggerModule.setup('api/docs', app, document, {
+      swaggerOptions: { persistAuthorization: true },
+    });
+  }
+
   const port = configService.get<number>('port', { infer: true });
   await app.listen(port);
-  pinoLogger.log(`bootstrap: listening on port ${port}`);
+  pinoLogger.log(
+    `bootstrap: listening on port ${port} (swagger=${swaggerEnabled ? 'on' : 'off'})`,
+  );
 }
 await bootstrap();
