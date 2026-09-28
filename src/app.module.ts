@@ -14,6 +14,7 @@ import { AuthModule } from './auth/auth.module.js';
 import { CommonModule } from './common/common.module.js';
 import { configuration } from './config/configuration.js';
 import { validate } from './config/config.validation.js';
+import { HealthModule } from './health/health.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { UsersModule } from './users/users.module.js';
 
@@ -34,6 +35,7 @@ import { UsersModule } from './users/users.module.js';
     PrismaModule,
     AuthModule,
     UsersModule,
+    HealthModule,
   ],
   controllers: [AppController],
   providers: [
