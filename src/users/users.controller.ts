@@ -21,6 +21,7 @@ import {
 } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { PaginationDto } from '../common/pagination/pagination.dto.js';
+import { CurrentUser, type JwtUser } from '../auth/decorators/current-user.decorator.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
@@ -33,22 +34,44 @@ import type { PaginatedResult } from '../common/pagination/paginated-result.js';
 /**
  * UsersController — CRUD over the `users` resource.
  *
- * All endpoints are gated by `JwtAuthGuard` + `RolesGuard` with the ADMIN
- * role. The envelope interceptor (PR #4) is wired globally in `main.ts`
- * and wraps every successful response; `PaginatedResult` is recognized
- * and its pagination fields flow into `meta`.
+ * Class-level `JwtAuthGuard` requires every endpoint to be called with a
+ * valid bearer token. `RolesGuard` is applied per-handler on the ADMIN-only
+ * routes (`POST`, `GET`, `GET :id`, `PATCH :id`, `DELETE :id`); the
+ * `GET /me` endpoint deliberately omits `RolesGuard` so any authenticated
+ * user can read their own profile (spec §3 — "Any authenticated user reads
+ * own profile via GET /users/me").
  *
- * Spec §3 — every write endpoint requires ADMIN; password is never echoed
- * back (handled by UsersService / DTOs).
+ * The envelope interceptor (PR #4) is wired globally in `main.ts` and
+ * wraps every successful response; `PaginatedResult` is recognized and its
+ * pagination fields flow into `meta`.
+ *
+ * Spec §3 — ADMIN writes; password is never echoed back (handled by
+ * UsersService / DTOs).
  */
 @ApiTags('users')
 @ApiBearerAuth('access-token')
 @Controller('users')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard)
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
+  @Get('me')
+  @ApiOperation({
+    summary: 'Get the authenticated user\u2019s own profile',
+    description:
+      'Any authenticated user can read their own profile. The id is taken from the JWT payload, so no path/query parameter is required.',
+  })
+  @ApiResponse({ status: 200, description: 'Profile returned.' })
+  @ApiResponse({
+    status: 401,
+    description: 'INVALID_TOKEN — missing or expired access token.',
+  })
+  async getMyProfile(@CurrentUser() user: JwtUser): Promise<UserResponse> {
+    return this.usersService.findOne(user.userId);
+  }
+
   @Post()
+  @UseGuards(RolesGuard)
   @Roles(Role.ADMIN)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
@@ -70,6 +93,7 @@ export class UsersController {
   }
 
   @Get()
+  @UseGuards(RolesGuard)
   @Roles(Role.ADMIN)
   @ApiOperation({
     summary: 'List users with pagination (ADMIN)',
@@ -86,6 +110,7 @@ export class UsersController {
   }
 
   @Get(':id')
+  @UseGuards(RolesGuard)
   @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Get a user by id (ADMIN)' })
   @ApiResponse({ status: 200, description: 'User found.' })
@@ -95,6 +120,7 @@ export class UsersController {
   }
 
   @Patch(':id')
+  @UseGuards(RolesGuard)
   @Roles(Role.ADMIN)
   @ApiOperation({
     summary: 'Update a user (ADMIN)',
@@ -115,6 +141,7 @@ export class UsersController {
   }
 
   @Delete(':id')
+  @UseGuards(RolesGuard)
   @Roles(Role.ADMIN)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Hard-delete a user (ADMIN)' })
