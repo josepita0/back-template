@@ -1,0 +1,75 @@
+// Back-Template Prisma schema
+// Stable Prisma 7.x — DO NOT bump to 8.x without revisiting all generated types.
+// Database: PostgreSQL (per spec §1).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// NOTE (Prisma 7): `url` is no longer allowed in the datasource block.
+// Connection URL lives in `prisma.config.ts` (CLI) and is passed via the
+// `@prisma/adapter-pg` driver adapter at runtime (see src/prisma/).
+datasource db {
+  provider = "postgresql"
+}
+
+// User roles — spec §1, used for role-based authorization in the Users + Auth modules.
+enum Role {
+  USER
+  ADMIN
+}
+
+// Core identity. `password` stores a bcrypt/argon2 hash (never plaintext).
+// `name` is optional (some users may have email-only accounts).
+// `isActive` is the suspension flag — no soft-delete column per design decision.
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String?
+  role      Role     @default(USER)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  refreshTokens        RefreshToken[]
+  passwordResetTokens  PasswordResetToken[]
+
+  @@map("users")
+}
+
+// Refresh tokens are issued by POST /auth/login (when JWT_REFRESH_ENABLED=true)
+// and rotated atomically in POST /auth/refresh.
+// `token` is the opaque secret; lookup happens server-side only.
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+// Admin-driven password reset (spec §2 — no email dependency).
+// `token` stores a SHA-256 hash of the secret presented by the user; the raw token
+// is communicated to the user out-of-band by the admin. `usedAt` is set on
+// successful redemption to prevent reuse.
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  token     String    @unique
+  userId    String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
+}
