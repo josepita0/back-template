@@ -249,4 +249,82 @@ describe.skipIf(!process.env.DATABASE_URL)('Users (integration)', () => {
       error: { code: 'INVALID_TOKEN' },
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // 5) GET /users/me — any authenticated user reads their own profile
+  //    Spec §3 MUST: 'Any authenticated user reads own profile via GET /users/me'.
+  //    The endpoint must NOT be ADMIN-gated.
+  // ---------------------------------------------------------------------------
+  it('WHEN an authenticated USER calls GET /users/me → 200 with their own profile (no password)', async () => {
+    // Create a USER (the admin already exists in setup).
+    const meEmail = `me-${SUITE_TAG}@example.com`;
+    const mePassword = 'my-strong-password-1';
+
+    const createRes = await request(app.getHttpServer())
+      .post('/users')
+      .set('Authorization', `Bearer ${adminAccessToken}`)
+      .send({ email: meEmail, password: mePassword, name: 'Me' })
+      .expect(201);
+
+    const myId = createRes.body.data.id;
+    expect(myId).toBeTruthy();
+
+    // Login as that USER (not as the admin) so we exercise the no-ADMIN
+    // gating path: the caller is a plain USER and /me must still work.
+    const loginRes = await request(app.getHttpServer())
+      .post('/auth/login')
+      .send({ email: meEmail, password: mePassword })
+      .expect(200);
+
+    const myToken = loginRes.body.data.accessToken;
+    expect(myToken).toBeTruthy();
+
+    // GET /users/me with the USER's token.
+    const meRes = await request(app.getHttpServer())
+      .get('/users/me')
+      .set('Authorization', `Bearer ${myToken}`)
+      .expect(200);
+
+    expect(meRes.body).toMatchObject({
+      success: true,
+      data: {
+        id: myId,
+        email: meEmail,
+        role: 'USER',
+        name: 'Me',
+        isActive: true,
+      },
+    });
+    // The password (hash) MUST NEVER appear in the response.
+    expect(meRes.body.data.password).toBeUndefined();
+    expect(meRes.body.data.passwordHash).toBeUndefined();
+  });
+
+  it('WHEN an ADMIN calls GET /users/me → 200 with their own profile (admins are users too)', async () => {
+    const meRes = await request(app.getHttpServer())
+      .get('/users/me')
+      .set('Authorization', `Bearer ${adminAccessToken}`)
+      .expect(200);
+
+    expect(meRes.body).toMatchObject({
+      success: true,
+      data: {
+        email: adminEmail,
+        role: 'ADMIN',
+        isActive: true,
+      },
+    });
+    expect(meRes.body.data.password).toBeUndefined();
+  });
+
+  it('WHEN GET /users/me without a bearer token → 401 INVALID_TOKEN', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/users/me')
+      .expect(401);
+
+    expect(res.body).toMatchObject({
+      success: false,
+      error: { code: 'INVALID_TOKEN' },
+    });
+  });
 });
