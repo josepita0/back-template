@@ -124,6 +124,24 @@ export class PinoLoggerService implements LoggerService {
   // pino-http middleware factory
   // ---------------------------------------------------------------------------
   /**
+   * Generates a per-request id: echoes `X-Request-Id` from the incoming
+   * request when present, otherwise produces a UUID v4. The id is
+   * written back to the response `X-Request-Id` header so clients can
+   * correlate logs.
+   *
+   * Exposed as a public method so tests can drive it directly without
+   * instantiating the full pino-http middleware (which requires a
+   * Node IncomingMessage + ServerResponse pair and listens for
+   * response end events).
+   */
+  generateRequestId(req: { headers: Record<string, string | string[] | undefined> }, res: { setHeader: (name: string, value: string) => void }): string {
+    const headerId = req.headers['x-request-id'];
+    const id = typeof headerId === 'string' && headerId.length > 0 ? headerId : randomUUID();
+    res.setHeader('X-Request-Id', id);
+    return id;
+  }
+
+  /**
    * Returns an Express middleware (compatible with `app.use(...)`) that
    * attaches a `requestId` to every request (header or generated) and
    * emits a structured "request completed" log line.
@@ -136,13 +154,11 @@ export class PinoLoggerService implements LoggerService {
   httpMiddleware() {
     return pinoHttp({
       logger: this.logger,
-      genReqId: (req: IncomingMessage, res: ServerResponse): string => {
-        const headerId = req.headers['x-request-id'];
-        const id =
-          typeof headerId === 'string' && headerId.length > 0 ? headerId : randomUUID();
-        res.setHeader('X-Request-Id', id);
-        return id;
-      },
+      genReqId: (req: IncomingMessage, res: ServerResponse): string =>
+        this.generateRequestId(
+          { headers: req.headers as Record<string, string | string[] | undefined> },
+          { setHeader: (name, value) => res.setHeader(name, value) },
+        ),
       customLogLevel: (_req, res, err) => {
         if (err || res.statusCode >= 500) return 'error';
         if (res.statusCode >= 400) return 'warn';

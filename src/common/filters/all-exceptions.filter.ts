@@ -139,8 +139,18 @@ export class AllExceptionsFilter implements ExceptionFilter {
     }
 
     // Stack trace handling: never leak to the client in production.
-    if (!isProd && exception instanceof Error && exception.stack) {
-      body = { ...body, details: { ...(body.details as object | undefined), stack: exception.stack } };
+// We only attach the stack when the error is unhandled (5xx) AND no
+// structured details were already supplied — preserving the canonical
+// shape for validation/HTTP exceptions and adding debugging context
+// for genuine server errors.
+    if (
+      !isProd &&
+      status >= 500 &&
+      exception instanceof Error &&
+      exception.stack &&
+      body.details === undefined
+    ) {
+      body = { ...body, details: { stack: exception.stack } };
     }
 
     // Log unhandled errors (5xx) at error; 4xx at warn.
