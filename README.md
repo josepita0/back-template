@@ -306,4 +306,4 @@ Before deploying:
 
 ## License
 
-UNLICENSED — internal template, customize per project.
+[MIT](LICENSE) © josepita0

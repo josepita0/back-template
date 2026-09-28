@@ -1,11 +1,31 @@
 {
-  "name": "back-template",
-  "version": "0.0.1",
-  "description": "",
-  "author": "",
-  "private": true,
-  "license": "UNLICENSED",
+  "name": "nestjs-backend-template",
+  "version": "1.0.0",
+  "description": "Production-ready NestJS 12 backend template with JWT auth, Prisma 7, structured logging, and security baseline",
+  "author": "josepita0",
+  "private": false,
+  "license": "MIT",
   "type": "module",
+  "keywords": [
+    "nestjs",
+    "backend",
+    "template",
+    "boilerplate",
+    "jwt",
+    "prisma",
+    "postgresql",
+    "typescript",
+    "authentication",
+    "rest-api"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/josepita0/back-template"
+  },
+  "bugs": {
+    "url": "https://github.com/josepita0/back-template/issues"
+  },
+  "homepage": "https://github.com/josepita0/back-template#readme",
   "scripts": {
     "build": "nest build",
     "deploy": "nest deploy",
