@@ -60,6 +60,9 @@ logs
 .oxlintcache
 .tsbuildinfo
 
+# Generated diagrams
+.archify/
+
 # Local SDD / planning context (do not commit orchestration state)
 /.atl
 
