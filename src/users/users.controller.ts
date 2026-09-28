@@ -15,7 +15,6 @@ import {
 import { Role } from '@prisma/client';
 import { EnvelopeInterceptor } from '../common/interceptors/envelope.interceptor.js';
 import { PaginationDto } from '../common/pagination/pagination.dto.js';
-import { CurrentUser, type JwtUser } from '../auth/decorators/current-user.decorator.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
