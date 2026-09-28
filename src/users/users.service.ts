@@ -1,13 +1,9 @@
-import {
-  ConflictException,
-  Injectable,
-  Logger,
-  NotFoundException,
-} from '@nestjs/common';
-import { Prisma, Role, User } from '@prisma/client';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Prisma, Role, type User } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { PaginatedResult } from '../common/pagination/paginated-result.js';
+import { ErrorCodes } from '../common/constants/error-codes.js';
 import { CreateUserDto } from './dto/create-user.dto.js';
 import { UpdateUserDto } from './dto/update-user.dto.js';
 import { toUserResponse, type UserResponse } from './dto/user-response.dto.js';
@@ -19,14 +15,20 @@ const BCRYPT_ROUNDS = 12;
  *
  * Contract (spec §3):
  * - CreateUserDto.password is bcrypt-hashed before storage.
- * - P2002 (unique email) → ConflictException(EMAIL_ALREADY_EXISTS, 409).
- * - P2025 (record not found on update/delete) → NotFoundException(USER_NOT_FOUND, 404).
- * - findOne / findAll / update / remove never include the password column.
- *   `toUserResponse()` strips the field defensively before returning.
+ * - P2002 (unique email) → re-thrown as-is; the global PrismaExceptionFilter
+ *   (src/common/filters/prisma-exception.filter.ts) maps it to 409
+ *   EMAIL_ALREADY_EXISTS. The previous in-service mapping has been
+ *   removed in PR #4 so the filter is the single source of truth.
+ * - P2025 (record not found on update/delete) → re-thrown; same filter
+ *   maps to 404 NOT_FOUND. Where a controller-level 404 needs a more
+ *   specific message, the service throws NotFoundException explicitly
+ *   with code USER_NOT_FOUND (e.g. findOne).
+ * - findOne / findAll / update / remove never include the password
+ *   column. `toUserResponse()` strips the field defensively.
  *
- * The envelope interceptor wraps the returned values into
- * `{ data, meta }`; `PaginatedResult` is recognized and its pagination
- * fields flow into `meta`.
+ * The envelope interceptor wraps returned values into `{ data, meta }`;
+ * `PaginatedResult` is recognized and its pagination fields flow into
+ * `meta`.
  */
 @Injectable()
 export class UsersService {
@@ -53,11 +55,12 @@ export class UsersService {
       this.logger.log(`created user id=${user.id} email=${user.email} role=${user.role}`);
       return toUserResponse(user);
     } catch (err) {
+      // Prisma P2002 (unique email) → PrismaExceptionFilter (409 EMAIL_ALREADY_EXISTS).
+      // Everything else → AllExceptionsFilter (500).
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-        throw new ConflictException({
-          code: 'EMAIL_ALREADY_EXISTS',
-          message: `A user with email "${dto.email}" already exists`,
-        });
+        this.logger.warn(
+          `create failed: email "${dto.email}" already exists (Prisma P2002)`,
+        );
       }
       throw err;
     }
@@ -92,7 +95,7 @@ export class UsersService {
 
     if (!user) {
       throw new NotFoundException({
-        code: 'USER_NOT_FOUND',
+        code: ErrorCodes.USER_NOT_FOUND,
         message: `User with id "${id}" not found`,
       });
     }
@@ -128,18 +131,16 @@ export class UsersService {
       this.logger.log(`updated user id=${id} fields=${Object.keys(data).join(',')}`);
       return toUserResponse(user);
     } catch (err) {
+      // P2025 → PrismaExceptionFilter (404 NOT_FOUND)
+      // P2002 → PrismaExceptionFilter (409 EMAIL_ALREADY_EXISTS)
+      // Both are 4xx client errors; the filter maps the canonical envelope.
+      // We don't re-throw with our own ConflictException / NotFoundException
+      // because that would override the filter's response shape.
       if (err instanceof Prisma.PrismaClientKnownRequestError) {
         if (err.code === 'P2025') {
-          throw new NotFoundException({
-            code: 'USER_NOT_FOUND',
-            message: `User with id "${id}" not found`,
-          });
-        }
-        if (err.code === 'P2002') {
-          throw new ConflictException({
-            code: 'EMAIL_ALREADY_EXISTS',
-            message: `A user with that email already exists`,
-          });
+          this.logger.warn(`update failed: user id=${id} not found (Prisma P2025)`);
+        } else if (err.code === 'P2002') {
+          this.logger.warn(`update failed: duplicate email on user id=${id} (Prisma P2002)`);
         }
       }
       throw err;
@@ -155,11 +156,9 @@ export class UsersService {
       this.logger.log(`deleted user id=${id}`);
       return { id };
     } catch (err) {
+      // P2025 → PrismaExceptionFilter (404 NOT_FOUND)
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') {
-        throw new NotFoundException({
-          code: 'USER_NOT_FOUND',
-          message: `User with id "${id}" not found`,
-        });
+        this.logger.warn(`delete failed: user id=${id} not found (Prisma P2025)`);
       }
       throw err;
     }

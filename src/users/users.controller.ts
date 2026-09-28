@@ -10,10 +10,8 @@ import {
   Post,
   Query,
   UseGuards,
-  UseInterceptors,
 } from '@nestjs/common';
 import { Role } from '@prisma/client';
-import { EnvelopeInterceptor } from '../common/interceptors/envelope.interceptor.js';
 import { PaginationDto } from '../common/pagination/pagination.dto.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
@@ -28,18 +26,15 @@ import type { PaginatedResult } from '../common/pagination/paginated-result.js';
  * UsersController — CRUD over the `users` resource.
  *
  * All endpoints are gated by `JwtAuthGuard` + `RolesGuard` with the ADMIN
- * role. The envelope interceptor wraps successful responses; `PaginatedResult`
- * is recognized and its pagination fields flow into `meta`.
+ * role. The envelope interceptor (PR #4) is wired globally in `main.ts`
+ * and wraps every successful response; `PaginatedResult` is recognized
+ * and its pagination fields flow into `meta`.
  *
  * Spec §3 — every write endpoint requires ADMIN; password is never echoed
  * back (handled by UsersService / DTOs).
- *
- * NOTE: `EnvelopeInterceptor` is wired per-controller in PR #3. PR #4
- * may lift it to a global interceptor once the global filters land.
  */
 @Controller('users')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@UseInterceptors(EnvelopeInterceptor)
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 

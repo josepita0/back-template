@@ -1,4 +1,4 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { NotFoundException } from '@nestjs/common';
 import { Prisma, Role } from '@prisma/client';
 import { Test, TestingModule } from '@nestjs/testing';
 import * as bcrypt from 'bcrypt';
@@ -209,17 +209,19 @@ describe('UsersService', () => {
       expect(result).not.toHaveProperty('password');
     });
 
-    it('GIVEN a duplicate email → throws ConflictException(EMAIL_ALREADY_EXISTS)', async () => {
+    it('GIVEN a duplicate email → re-throws Prisma P2002 (mapped by PrismaExceptionFilter)', async () => {
       const dto: CreateUserDto = {
         email: 'alice@example.com', // already in the seeded fixture
         password: 'plain-text-pw',
       };
 
-      await expect(service.create(dto)).rejects.toBeInstanceOf(ConflictException);
-      await expect(service.create(dto)).rejects.toMatchObject({
-        status: 409,
-        response: { code: 'EMAIL_ALREADY_EXISTS' },
-      });
+      // PR #4: UsersService no longer maps P2002 to ConflictException — the
+      // global PrismaExceptionFilter (src/common/filters/prisma-exception.filter.ts)
+      // owns the 409 EMAIL_ALREADY_EXISTS mapping. The service just logs and
+      // re-throws so the filter can produce the canonical envelope.
+      const caught = await service.create(dto).catch((err) => err);
+      expect(caught).toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
+      expect((caught as Prisma.PrismaClientKnownRequestError).code).toBe('P2002');
     });
   });
 
@@ -337,7 +339,7 @@ describe('UsersService', () => {
       expect(await bcrypt.compare('fresh-password-1', updated.data.password)).toBe(true);
     });
 
-    it('GIVEN a duplicate email → throws ConflictException(EMAIL_ALREADY_EXISTS)', async () => {
+    it('GIVEN a duplicate email → re-throws Prisma P2002 (mapped by PrismaExceptionFilter)', async () => {
       prisma = buildPrismaMock({
         users: [
           userFixture({ id: 'u1', email: 'a@a.c' }),
@@ -352,17 +354,21 @@ describe('UsersService', () => {
       }).compile();
       service = module.get(UsersService);
 
+      // PR #4: P2002 is now handled by PrismaExceptionFilter — the service
+      // just logs and re-throws.
       const dto: UpdateUserDto = { email: 'b@b.c' };
-      await expect(service.update('u1', dto)).rejects.toBeInstanceOf(ConflictException);
-      await expect(service.update('u1', dto)).rejects.toMatchObject({
-        status: 409,
-        response: { code: 'EMAIL_ALREADY_EXISTS' },
-      });
+      const caught = await service.update('u1', dto).catch((err) => err);
+      expect(caught).toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
+      expect((caught as Prisma.PrismaClientKnownRequestError).code).toBe('P2002');
     });
 
-    it('GIVEN an unknown id → throws NotFoundException(USER_NOT_FOUND)', async () => {
+    it('GIVEN an unknown id → re-throws Prisma P2025 (mapped by PrismaExceptionFilter)', async () => {
+      // PR #4: P2025 is also handled by PrismaExceptionFilter. The service
+      // logs and re-throws so the filter can produce the 404 envelope.
       const dto: UpdateUserDto = { name: 'X' };
-      await expect(service.update('missing', dto)).rejects.toBeInstanceOf(NotFoundException);
+      const caught = await service.update('missing', dto).catch((err) => err);
+      expect(caught).toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
+      expect((caught as Prisma.PrismaClientKnownRequestError).code).toBe('P2025');
     });
 
     it('GIVEN an empty patch → returns the current user (no DB write)', async () => {
@@ -382,12 +388,12 @@ describe('UsersService', () => {
       expect(result).toEqual({ id: 'user-1' });
     });
 
-    it('GIVEN an unknown id → throws NotFoundException(USER_NOT_FOUND)', async () => {
-      await expect(service.remove('does-not-exist')).rejects.toBeInstanceOf(NotFoundException);
-      await expect(service.remove('does-not-exist')).rejects.toMatchObject({
-        status: 404,
-        response: { code: 'USER_NOT_FOUND' },
-      });
+    it('GIVEN an unknown id → re-throws Prisma P2025 (mapped by PrismaExceptionFilter)', async () => {
+      // PR #4: P2025 is also handled by PrismaExceptionFilter. The service
+      // logs and re-throws so the filter can produce the 404 envelope.
+      const caught = await service.remove('does-not-exist').catch((err) => err);
+      expect(caught).toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
+      expect((caught as Prisma.PrismaClientKnownRequestError).code).toBe('P2025');
     });
   });
 

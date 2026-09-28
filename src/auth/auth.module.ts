@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
-import { ThrottlerModule } from '@nestjs/throttler';
 import type { AppConfig } from '../config/configuration.js';
 import { AuthController } from './auth.controller.js';
 import { AuthService } from './auth.service.js';
@@ -12,11 +11,12 @@ import { RolesGuard } from './guards/roles.guard.js';
  * AuthModule — wires JWT verification (plain JwtAuthGuard using
  * @nestjs/jwt's JwtService), token issuance (JwtModule.registerAsync),
  * guards (JwtAuthGuard, RolesGuard), and the AuthService. Exports AuthService
- * + guards so other modules can reuse the role-based access control.
+ * + JwtService + guards so other modules can reuse the role-based access
+ * control without re-declaring JwtModule.
  *
- * ThrottlerModule is registered locally to ensure @Throttle() metadata on
- * the login route resolves even before the global wiring lands in PR #4.
- * Spec §2 — login is 5 req/min per IP.
+ * ThrottlerModule is registered GLOBALLY in AppModule (PR #4); the
+ * @Throttle override on POST /auth/login resolves against the global
+ * registration. Spec §2 — login is 5 req/min per IP, default is 100/min.
  */
 @Module({
   imports: [
@@ -34,16 +34,9 @@ import { RolesGuard } from './guards/roles.guard.js';
         },
       }),
     }),
-    ThrottlerModule.forRoot([
-      {
-        name: 'default',
-        ttl: 60_000,
-        limit: 5,
-      },
-    ]),
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtAuthGuard, RolesGuard],
-  exports: [AuthService, JwtAuthGuard, RolesGuard],
+  exports: [AuthService, JwtModule, JwtAuthGuard, RolesGuard],
 })
 export class AuthModule {}
