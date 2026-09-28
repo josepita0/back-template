@@ -11,7 +11,8 @@ import { RolesGuard } from './guards/roles.guard.js';
  * AuthModule — wires JWT verification (plain JwtAuthGuard using
  * @nestjs/jwt's JwtService), token issuance (JwtModule.registerAsync),
  * guards (JwtAuthGuard, RolesGuard), and the AuthService. Exports AuthService
- * + guards so other modules can reuse the role-based access control.
+ * + JwtService + guards so other modules can reuse the role-based access
+ * control without re-declaring JwtModule.
  *
  * ThrottlerModule is registered GLOBALLY in AppModule (PR #4); the
  * @Throttle override on POST /auth/login resolves against the global
@@ -36,6 +37,6 @@ import { RolesGuard } from './guards/roles.guard.js';
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtAuthGuard, RolesGuard],
-  exports: [AuthService, JwtAuthGuard, RolesGuard],
+  exports: [AuthService, JwtModule, JwtAuthGuard, RolesGuard],
 })
 export class AuthModule {}

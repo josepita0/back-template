@@ -1,7 +1,6 @@
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory, Reflector } from '@nestjs/core';
-import { ThrottlerGuard } from '@nestjs/throttler';
 import helmet from 'helmet';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter.js';
 import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter.js';
@@ -52,11 +51,11 @@ async function bootstrap() {
   });
 
   // ---- Guards ----------------------------------------------------------------
-  // ThrottlerGuard as APP_GUARD applies to every route. Per-route overrides
-  // (e.g. @Throttle({ default: { limit: 5, ttl: 60_000 } }) on POST /auth/login)
-  // still work because NestJS consults metadata after the global guard runs.
-  // ThrottlerModule is registered globally in AppModule (PR #4).
-  app.useGlobalGuards(app.get(ThrottlerGuard));
+  // ThrottlerGuard is wired as APP_GUARD in AppModule (PR #4). Per-route
+  // overrides (e.g. @Throttle({ default: { limit: 5, ttl: 60_000 } }) on
+  // POST /auth/login) still work because NestJS consults metadata after
+  // the global guard runs. ThrottlerModule is registered globally in
+  // AppModule; ThrottlerStorage is provided by that module.
 
   // ---- Pipes -----------------------------------------------------------------
   // Global ValidationPipe: class-validator decorators on DTOs are only
