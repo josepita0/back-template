@@ -11,6 +11,13 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Throttle } from '@nestjs/throttler';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import type { AppConfig } from '../config/configuration.js';
 import { AuthService } from './auth.service.js';
@@ -49,6 +56,7 @@ const REFRESH_COOKIE_NAME = 'rt';
  * an httpOnly cookie (Secure in production, SameSite=strict). Otherwise
  * the token is returned in the response body.
  */
+@ApiTags('auth')
 @Controller('auth')
 export class AuthController {
   constructor(
@@ -59,6 +67,28 @@ export class AuthController {
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Authenticate with email + password',
+    description:
+      'Returns an access token and (when JWT_REFRESH_ENABLED=true) a refresh token. Throttled to 5 req/min per IP.',
+  })
+  @ApiBody({ type: LoginDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Authentication succeeded — tokens returned.',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'INVALID_CREDENTIALS — wrong email or password.',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'ACCOUNT_SUSPENDED — user isActive=false.',
+  })
+  @ApiResponse({
+    status: 429,
+    description: 'Too many login attempts — back off and retry after the TTL.',
+  })
   async login(
     @Body() dto: LoginDto,
     @Res({ passthrough: true }) response: Response,
@@ -70,6 +100,20 @@ export class AuthController {
 
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Rotate refresh token + issue new access token',
+    description:
+      'Accepts the refresh token in the body (or in the `rt` cookie when AUTH_COOKIE_ENABLED=true) and atomically rotates it.',
+  })
+  @ApiBody({ type: RefreshTokenDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Refresh succeeded — new tokens returned.',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'INVALID_TOKEN — refresh token is invalid or expired.',
+  })
   async refresh(
     @Body() dto: RefreshTokenDto,
     @Req() request: Request,
@@ -88,6 +132,29 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Admin: generate a password-reset token for a user',
+    description:
+      'Returns a one-shot token with a 1h TTL. The admin must communicate the token to the user out-of-band (no SMTP dependency).',
+  })
+  @ApiBody({ type: AdminResetPasswordDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Token generated — communicate to the user.',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'USER_NOT_FOUND — userId does not exist.',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'INVALID_TOKEN — missing or expired access token.',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'FORBIDDEN — caller is not an ADMIN.',
+  })
   async adminResetPassword(
     @CurrentUser() admin: JwtUser,
     @Body() dto: AdminResetPasswordDto,
@@ -97,6 +164,20 @@ export class AuthController {
 
   @Post('reset-password')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Redeem a password-reset token',
+    description:
+      'Updates the user password, marks the token used, and revokes all refresh tokens for the user.',
+  })
+  @ApiBody({ type: ResetPasswordDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Password updated.',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'TOKEN_EXPIRED — token invalid, used, or expired.',
+  })
   async resetPassword(@Body() dto: ResetPasswordDto) {
     return this.authService.resetPassword(dto.token, dto.newPassword);
   }
@@ -104,6 +185,20 @@ export class AuthController {
   @Post('revoke-all')
   @HttpCode(HttpStatus.OK)
   @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Revoke every refresh token for the authenticated user',
+    description:
+      'Forces re-authentication on every device. Returns the count of revoked tokens.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Tokens revoked — returns `{ count }`.',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'INVALID_TOKEN — missing or expired access token.',
+  })
   async revokeAll(@CurrentUser() user: JwtUser) {
     return this.authService.revokeAllRefreshTokens(user.userId);
   }
