@@ -1,20 +1,18 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
-import { PassportModule } from '@nestjs/passport';
 import { ThrottlerModule } from '@nestjs/throttler';
 import type { AppConfig } from '../config/configuration.js';
 import { AuthController } from './auth.controller.js';
 import { AuthService } from './auth.service.js';
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js';
 import { RolesGuard } from './guards/roles.guard.js';
-import { JwtStrategy } from './strategies/jwt.strategy.js';
 
 /**
- * AuthModule — wires JWT verification (Passport strategy), token issuance
- * (JwtModule.registerAsync), guards (JwtAuthGuard, RolesGuard), and the
- * AuthService. Exports AuthService + guards so other modules can reuse the
- * role-based access control.
+ * AuthModule — wires JWT verification (plain JwtAuthGuard using
+ * @nestjs/jwt's JwtService), token issuance (JwtModule.registerAsync),
+ * guards (JwtAuthGuard, RolesGuard), and the AuthService. Exports AuthService
+ * + guards so other modules can reuse the role-based access control.
  *
  * ThrottlerModule is registered locally to ensure @Throttle() metadata on
  * the login route resolves even before the global wiring lands in PR #4.
@@ -22,7 +20,6 @@ import { JwtStrategy } from './strategies/jwt.strategy.js';
  */
 @Module({
   imports: [
-    PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -46,7 +43,7 @@ import { JwtStrategy } from './strategies/jwt.strategy.js';
     ]),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, JwtAuthGuard, RolesGuard],
+  providers: [AuthService, JwtAuthGuard, RolesGuard],
   exports: [AuthService, JwtAuthGuard, RolesGuard],
 })
 export class AuthModule {}

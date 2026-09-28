@@ -49,10 +49,15 @@ describe('AuthController', () => {
         { provide: ConfigService, useFactory: () => buildConfigMock() },
         // Guards registered so decorators are resolvable; their actual logic
         // is exercised in the dedicated *.spec.ts files.
-        { provide: JwtAuthGuard, useValue: { canActivate: () => true } },
-        { provide: RolesGuard, useValue: { canActivate: () => true } },
       ],
-    }).compile();
+    })
+      // JwtAuthGuard now has constructor deps (JwtService + ConfigService)
+      // so we override it explicitly via overrideGuard instead of a provider.
+      .overrideGuard(JwtAuthGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(RolesGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
 
     controller = module.get(AuthController);
   });

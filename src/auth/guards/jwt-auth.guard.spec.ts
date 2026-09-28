@@ -1,74 +1,144 @@
-import { ExecutionContext } from '@nestjs/common';
+import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { JwtService } from '@nestjs/jwt';
 import { Test, TestingModule } from '@nestjs/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AppConfig } from '../../config/configuration.js';
 import { JwtAuthGuard } from './jwt-auth.guard.js';
 
 /**
- * JwtAuthGuard is a thin subclass of @nestjs/passport's AuthGuard('jwt').
- * The unit-level guarantee we want is that the guard exists, that it
- * delegates to Passport's `jwt` strategy name, and that it rejects when
- * no PassportStrategy is registered (the canonical failure mode for a
- * guard whose backing strategy is missing).
+ * JwtAuthGuard is a plain CanActivate that:
+ *   1. pulls a Bearer token from the Authorization header
+ *   2. delegates signature/expiry verification to @nestjs/jwt's JwtService
+ *   3. attaches the verified payload to request.user
+ *   4. throws UnauthorizedException on any failure
+ *
+ * These tests cover each branch with no Laravel — scaffold a plain CanActivate
+ * guard with no Passport involved.
  */
 
-const buildContext = (): ExecutionContext =>
+const buildConfigMock = (overrides: Partial<AppConfig> = {}): ConfigService =>
   ({
+    get: vi.fn((key: string) => {
+      const map: Record<string, unknown> = {
+        'jwt.accessSecret': 'test-access-secret',
+        'jwt.accessExpiresIn': '30m',
+        'jwt.refreshExpiresIn': '30d',
+        'jwt.refreshEnabled': true,
+      };
+      return map[key] ?? (overrides as Record<string, unknown>)[key];
+    }),
+  }) as unknown as ConfigService;
+
+const buildContext = (
+  headers: Record<string, string | undefined> = {},
+): ExecutionContext => {
+  const request = { headers };
+  return {
     switchToHttp: () => ({
-      getRequest: () => ({ headers: {}, cookies: {} }),
+      getRequest: () => request,
       getResponse: () => ({}),
       getNext: () => () => undefined,
     }),
     getHandler: () => () => undefined,
     getClass: () => class AuthController {},
-  }) as unknown as ExecutionContext;
+  } as unknown as ExecutionContext;
+};
 
 describe('JwtAuthGuard', () => {
   let guard: JwtAuthGuard;
+  let jwt: { verifyAsync: ReturnType<typeof vi.fn> };
 
   beforeEach(async () => {
+    jwt = { verifyAsync: vi.fn() };
+
     const module: TestingModule = await Test.createTestingModule({
-      providers: [JwtAuthGuard],
+      providers: [
+        JwtAuthGuard,
+        { provide: JwtService, useValue: jwt },
+        { provide: ConfigService, useFactory: () => buildConfigMock() },
+      ],
     }).compile();
+
     guard = module.get(JwtAuthGuard);
   });
 
-  it('THEN it is an instance of AuthGuard("jwt") from @nestjs/passport', () => {
-    expect(guard).toBeDefined();
-    // The guard name is internal to @nestjs/passport; we assert the guard
-    // has the inherited `getAuthenticateOptions` method (a public Passport API).
-    expect(typeof (guard as unknown as { getAuthenticateOptions?: () => unknown }).getAuthenticateOptions).toBe('function');
+  describe('GIVEN no Authorization header', () => {
+    it('THEN canActivate throws UnauthorizedException(INVALID_TOKEN) without calling JwtService', async () => {
+      await expect(guard.canActivate(buildContext())).rejects.toMatchObject({
+        status: 401,
+        response: { code: 'INVALID_TOKEN' },
+      });
+      expect(jwt.verifyAsync).not.toHaveBeenCalled();
+    });
   });
 
-  it('GIVEN no Passport strategy registered → canActivate rejects', async () => {
-    // No JwtStrategy provider → AuthGuard('jwt') has nothing to call → rejects.
-    await expect(guard.canActivate(buildContext())).rejects.toBeDefined();
+  describe('GIVEN Authorization header without Bearer prefix', () => {
+    it('THEN canActivate throws UnauthorizedException(INVALID_TOKEN)', async () => {
+      await expect(
+        guard.canActivate(buildContext({ authorization: 'Basic abc' })),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(jwt.verifyAsync).not.toHaveBeenCalled();
+    });
   });
 
-  it('THEN handleRequest forwards a successful user payload', () => {
-    // handleRequest is the Passport-supplied error handler; with no error
-    // it returns the user as-is. We exercise it directly.
-    const handle = (
-      guard as unknown as { handleRequest: (err: unknown, user: unknown) => unknown }
-    ).handleRequest;
-    const user = { userId: 'u1', email: 'a@b.c', role: 'USER' };
-    expect(handle(null, user)).toEqual(user);
+  describe('GIVEN a valid Bearer token', () => {
+    it('THEN canActivate resolves to true and attaches the payload to request.user', async () => {
+      const payload = {
+        sub: 'user-1',
+        email: 'a@b.c',
+        role: 'USER',
+      };
+      jwt.verifyAsync.mockResolvedValue(payload);
+
+      const request = { headers: { authorization: 'Bearer valid-token' } };
+      const ctx = {
+        switchToHttp: () => ({
+          getRequest: () => request,
+          getResponse: () => ({}),
+          getNext: () => () => undefined,
+        }),
+        getHandler: () => () => undefined,
+        getClass: () => class AuthController {},
+      } as unknown as ExecutionContext;
+
+      const ok = await guard.canActivate(ctx);
+
+      expect(ok).toBe(true);
+      expect(request.user).toEqual({
+        userId: 'user-1',
+        email: 'a@b.c',
+        role: 'USER',
+      });
+      expect(jwt.verifyAsync).toHaveBeenCalledWith('valid-token', {
+        secret: 'test-access-secret',
+      });
+    });
   });
 
-  it('THEN handleRequest rejects when an error is provided', () => {
-    const handle = (
-      guard as unknown as {
-        handleRequest: (err: unknown, user: unknown, info?: unknown) => unknown;
-      }
-    ).handleRequest;
-    expect(() => handle(new Error('boom'), null)).toThrowError();
+  describe('GIVEN JwtService.verifyAsync throws (expired / bad signature / malformed)', () => {
+    it('THEN canActivate rejects with UnauthorizedException(INVALID_TOKEN)', async () => {
+      jwt.verifyAsync.mockRejectedValue(new Error('jwt expired'));
+
+      await expect(
+        guard.canActivate(buildContext({ authorization: 'Bearer bogus' })),
+      ).rejects.toMatchObject({
+        status: 401,
+        response: { code: 'INVALID_TOKEN' },
+      });
+    });
   });
 
-  it('THEN handleRequest rejects when no user is present', () => {
-    const handle = (
-      guard as unknown as {
-        handleRequest: (err: unknown, user: unknown, info?: unknown) => unknown;
-      }
-    ).handleRequest;
-    expect(() => handle(null, false)).toThrowError();
+  describe('GIVEN a token whose payload is missing required claims', () => {
+    it('THEN canActivate rejects with UnauthorizedException(INVALID_TOKEN)', async () => {
+      jwt.verifyAsync.mockResolvedValue({ sub: 'user-1' }); // missing email + role
+
+      await expect(
+        guard.canActivate(buildContext({ authorization: 'Bearer incomplete' })),
+      ).rejects.toMatchObject({
+        status: 401,
+        response: { code: 'INVALID_TOKEN' },
+      });
+    });
   });
 });

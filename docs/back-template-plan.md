@@ -5,7 +5,7 @@
 - **Framework**: NestJS
 - **Base de datos**: PostgreSQL
 - **ORM**: Prisma
-- **Autenticación**: JWT con Passport
+- **Autenticación**: JWT con `@nestjs/jwt` (guards `CanActivate` planos, sin Passport)
 - **Autorización**: Roles básicos (admin, user) — minimalista, escalable
 - **Arquitectura**: Híbrido NestJS + feature-based
 - **Testing**: Unit + Integration (Jest + @nestjs/testing)

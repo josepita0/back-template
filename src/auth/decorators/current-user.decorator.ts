@@ -2,7 +2,7 @@ import { ExecutionContext, createParamDecorator } from '@nestjs/common';
 
 /**
  * `@CurrentUser()` extracts the authenticated user from the request.
- * Populated by `JwtStrategy.validate()` via Passport on a successful JWT auth.
+ * Populated by `JwtAuthGuard.canActivate()` after a successful JWT verification.
  *
  * Spec §2 — exposes the JWT payload (userId, email, role) to controllers.
  */
