@@ -91,7 +91,9 @@ describe('JwtAuthGuard', () => {
       };
       jwt.verifyAsync.mockResolvedValue(payload);
 
-      const request = { headers: { authorization: 'Bearer valid-token' } };
+      const request: { headers: Record<string, string>; user?: unknown } = {
+        headers: { authorization: 'Bearer valid-token' },
+      };
       const ctx = {
         switchToHttp: () => ({
           getRequest: () => request,
