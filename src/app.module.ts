@@ -1,13 +1,19 @@
 import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
-import { ConfigModule, ConfigService } from '@nestjs/config';
-import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import {
+  THROTTLER_OPTIONS,
+} from '@nestjs/throttler/dist/throttler.constants.js';
+import {
+  ThrottlerStorage,
+} from '@nestjs/throttler/dist/throttler-storage.interface.js';
+import { ThrottlerGuard } from '@nestjs/throttler';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { AuthModule } from './auth/auth.module.js';
+import { CommonModule } from './common/common.module.js';
 import { configuration } from './config/configuration.js';
 import { validate } from './config/config.validation.js';
-import type { AppConfig } from './config/configuration.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { UsersModule } from './users/users.module.js';
 
@@ -21,20 +27,10 @@ import { UsersModule } from './users/users.module.js';
       envFilePath: ['.env.local', `.env.${process.env.NODE_ENV ?? 'development'}`, '.env'],
       cache: true,
     }),
-    // ThrottlerModule is registered GLOBALLY here in PR #4 (was local in
-    // AuthModule in PR #2). Spec §8 — 100 req/min default per IP; the
-    // stricter 5 req/min on POST /auth/login is enforced via @Throttle()
-    // metadata on the controller method.
-    ThrottlerModule.forRootAsync({
-      inject: [ConfigService],
-      useFactory: (configService: ConfigService<AppConfig, true>) => [
-        {
-          name: 'default',
-          ttl: configService.get<number>('throttle.ttlMs', { infer: true }),
-          limit: configService.get<number>('throttle.limit', { infer: true }),
-        },
-      ],
-    }),
+    // CommonModule is @Global() — exports ThrottlerModule's providers
+    // (THROTTLER_OPTIONS, ThrottlerStorage) so the APP_GUARD factory below
+    // can inject them.
+    CommonModule,
     PrismaModule,
     AuthModule,
     UsersModule,
@@ -42,12 +38,25 @@ import { UsersModule } from './users/users.module.js';
   controllers: [AppController],
   providers: [
     AppService,
-    // ThrottlerGuard as APP_GUARD applies to every route. Per-route
-    // overrides (e.g. @Throttle({ default: { limit: 5, ttl: 60_000 } })
-    // on POST /auth/login) still work because NestJS consults metadata
-    // after the global guard runs. ThrottlerModule is registered above
-    // (forRootAsync); ThrottlerStorage is provided by that module.
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    // ThrottlerGuard as APP_GUARD via useFactory (instead of useClass).
+    // useFactory lets us explicitly inject THROTTLER_OPTIONS, ThrottlerStorage,
+    // and Reflector — required because @nestjs/throttler v6's ThrottlerGuard
+    // constructor doesn't have a no-arg form, and APP_GUARD's useClass path
+    // doesn't auto-wire Reflector.
+    {
+      provide: APP_GUARD,
+      inject: [THROTTLER_OPTIONS, ThrottlerStorage, 'Reflector'],
+      useFactory: (
+        options: unknown,
+        storage: unknown,
+        reflector: import('@nestjs/core').Reflector,
+      ) =>
+        new ThrottlerGuard(
+          options as never,
+          storage as never,
+          reflector,
+        ),
+    },
   ],
 })
 export class AppModule {}

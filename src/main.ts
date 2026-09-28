@@ -17,10 +17,13 @@ import { AppModule } from './app.module.js';
  *   2. pino-http middleware → per-request log line + X-Request-Id
  *   3. helmet → security headers (CSP, X-Frame-Options, etc.)
  *   4. app.enableCors() → origins from CORS_ORIGINS
- *   5. ThrottlerGuard as APP_GUARD → 100 req/min global default (configurable)
- *   6. ValidationPipe with whitelist + forbidNonWhitelisted + transform
- *   7. AllExceptionsFilter + PrismaExceptionFilter as global filters
- *   8. EnvelopeInterceptor as a global interceptor (lifted from per-controller)
+ *   5. ValidationPipe with whitelist + forbidNonWhitelisted + transform
+ *   6. AllExceptionsFilter + PrismaExceptionFilter as global filters
+ *   7. EnvelopeInterceptor as a global interceptor (lifted from per-controller)
+ *
+ * ThrottlerGuard is wired as APP_GUARD in AppModule (PR #4); its
+ * Reflector dep comes from CommonModule (global). Per-route @Throttle()
+ * overrides still work because NestJS consults metadata after the guard.
  *
  * Filter registration order matters: NestJS invokes filters in REVERSE
  * registration order, so PrismaExceptionFilter must be registered LAST
@@ -50,13 +53,6 @@ async function bootstrap() {
     credentials: true,
   });
 
-  // ---- Guards ----------------------------------------------------------------
-  // ThrottlerGuard is wired as APP_GUARD in AppModule (PR #4). Per-route
-  // overrides (e.g. @Throttle({ default: { limit: 5, ttl: 60_000 } }) on
-  // POST /auth/login) still work because NestJS consults metadata after
-  // the global guard runs. ThrottlerModule is registered globally in
-  // AppModule; ThrottlerStorage is provided by that module.
-
   // ---- Pipes -----------------------------------------------------------------
   // Global ValidationPipe: class-validator decorators on DTOs are only
   // enforced when this pipe is registered. `whitelist:true` strips
@@ -80,7 +76,8 @@ async function bootstrap() {
   // ---- Interceptors ----------------------------------------------------------
   // Lifted from per-controller (UsersController in PR #3) to global. All
   // successful responses now go through the envelope; handlers can opt-out
-  // with @SkipEnvelope() for raw streams/buffers.
+  // with @SkipEnvelope() for raw streams/buffers. Reflector comes from
+  // CommonModule (global) so we can fetch it here.
   app.useGlobalInterceptors(new EnvelopeInterceptor(app.get(Reflector)));
 
   const port = configService.get<number>('port', { infer: true });

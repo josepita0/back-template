@@ -1,5 +1,13 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import { Test, TestingModule } from '@nestjs/testing';
+import { ThrottlerGuard } from '@nestjs/throttler';
+import {
+  THROTTLER_OPTIONS,
+} from '@nestjs/throttler/dist/throttler.constants.js';
+import {
+  ThrottlerStorage,
+} from '@nestjs/throttler/dist/throttler-storage.interface.js';
 import request from 'supertest';
 import type { App } from 'supertest/types.js';
 
@@ -36,10 +44,8 @@ describe.skipIf(!process.env.DATABASE_URL)('Throttler (e2e)', () => {
     }).compile();
 
     app = moduleFixture.createNestApplication();
-    // main.ts wires the global ValidationPipe; mirror it here so the
-    // throttler sees well-formed requests (no class-transformer errors).
-    // ThrottlerGuard is wired as APP_GUARD in AppModule — no need to
-    // re-register it here.
+    // main.ts wires the global ValidationPipe + ThrottlerGuard; mirror
+    // them here so the test exercises the same middleware stack.
     app.useGlobalPipes(
       new ValidationPipe({
         whitelist: true,
@@ -47,6 +53,16 @@ describe.skipIf(!process.env.DATABASE_URL)('Throttler (e2e)', () => {
         transform: true,
         transformOptions: { enableImplicitConversion: true },
       }),
+    );
+    const throttlerOptions = app.get<unknown>(THROTTLER_OPTIONS);
+    const throttlerStorage = app.get<unknown>(ThrottlerStorage);
+    const reflector = app.get(Reflector);
+    app.useGlobalGuards(
+      new ThrottlerGuard(
+        throttlerOptions as never,
+        throttlerStorage as never,
+        reflector,
+      ),
     );
     await app.init();
   });
@@ -59,8 +75,8 @@ describe.skipIf(!process.env.DATABASE_URL)('Throttler (e2e)', () => {
     // POST /auth/login has @Throttle({ default: { limit: 5, ttl: 60_000 } }).
     // We send 5 requests that pass through the throttler and reach the
     // controller. The controller may return 401 (no such user), 400
-    // (validation), or 500 (DB unreachable — see above) — all of which
-    // still increment the throttler counter, because the throttler runs
+    // (validation), or 500 (DB unreachable) — all of which still
+    // increment the throttler counter, because the throttler runs
     // BEFORE the controller. The 6th attempt must be blocked at the
     // throttler and return 429 regardless of what the controller would
     // have done.
