@@ -2,6 +2,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory, Reflector } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter.js';
 import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter.js';
@@ -49,6 +50,10 @@ async function bootstrap() {
   // present on every downstream log line.
   app.use(pinoLogger.httpMiddleware());
   app.use(helmet());
+  // cookie-parser populates `request.cookies` so AuthController.refresh()
+  // can read the refresh token from the `rt` cookie when AUTH_COOKIE_ENABLED
+  // is on. Must come before any controller that calls request.cookies.
+  app.use(cookieParser());
 
   const corsOrigins = configService.get<string[]>('cors.origins', { infer: true });
   app.enableCors({
