@@ -62,3 +62,6 @@ logs
 
 # Local SDD / planning context (do not commit orchestration state)
 /.atl
+
+# Docs template
+/docs
